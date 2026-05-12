@@ -1,0 +1,949 @@
+<!doctype html>
+<!--
+  Bubl — Spatial Audio Test (prototype)
+  Deploy to an HTTPS host (Vercel / Netlify / GitHub Pages). Geolocation and
+  DeviceOrientation refuse to work over http://. Open on a phone, outdoors,
+  with headphones, near 33.7377, -118.2792 (San Pedro Fish Market).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0e10">
+<title>Bubl · Spatial Audio Test</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+<style>
+  :root {
+    --bg: #0e0e10;
+    --panel: rgba(20,20,23,0.92);
+    --border: rgba(255,255,255,0.08);
+    --ink: #f5f4ef;
+    --ink-dim: rgba(245,244,239,0.55);
+    --ink-faint: rgba(245,244,239,0.35);
+    --accent: #d4ff3a;
+    --warn: #ffb84a;
+    --bad: #ff5a5a;
+    --good: #6ee27a;
+    --display: "Fraunces", Georgia, serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); }
+  body { font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+
+  /* Map fills viewport */
+  #map { position: absolute; inset: 0; background: #0a0a0c; }
+  .maplibregl-ctrl-attrib { background: rgba(0,0,0,0.4) !important; color: var(--ink-faint) !important; font-size: 9px; }
+  .maplibregl-ctrl-attrib a { color: var(--ink-dim) !important; }
+
+  /* ----- HEADER ----- */
+  .header {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 14px 16px;
+    padding-top: max(14px, env(safe-area-inset-top));
+    pointer-events: none;
+    z-index: 5;
+  }
+  .brand {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 22px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    font-variation-settings: "opsz" 96;
+    display: flex; align-items: baseline; gap: 4px;
+    pointer-events: auto;
+  }
+  .brand .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; transform: translateY(-2px); }
+
+  .status {
+    pointer-events: auto;
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.55;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    min-width: 132px;
+    text-align: right;
+  }
+  .status .row { display: flex; justify-content: space-between; gap: 8px; }
+  .status .row .k { color: var(--ink-faint); }
+  .status .row .v { color: var(--ink); font-weight: 500; }
+  .status .v.good  { color: var(--good); }
+  .status .v.warn  { color: var(--warn); }
+  .status .v.bad   { color: var(--bad); }
+
+  /* ----- BOTTOM PANEL ----- */
+  .panel {
+    position: absolute; left: 12px; right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px;
+    z-index: 5;
+    transition: transform 280ms cubic-bezier(.2,.7,.2,1), opacity 240ms ease;
+  }
+  .panel.hidden { transform: translateY(140%); opacity: 0; pointer-events: none; }
+
+  .bubble-list { display: flex; gap: 6px; margin-bottom: 10px; }
+  .bubble-chip {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 9px;
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bubble-chip .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    box-shadow: 0 0 8px currentColor;
+    flex-shrink: 0;
+  }
+  .bubble-chip.muted .dot { opacity: 0.25; box-shadow: none; }
+  .bubble-chip.selected { background: rgba(255,255,255,0.06); color: var(--ink); border-color: rgba(255,255,255,0.18); }
+  .bubble-chip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .controls { display: grid; gap: 9px; }
+  .ctrl-row { display: flex; align-items: center; gap: 10px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+  .ctrl-row .label { width: 56px; flex-shrink: 0; }
+  .ctrl-row .value { width: 46px; text-align: right; color: var(--ink); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .ctrl-row input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; background: transparent; height: 22px; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; background: rgba(255,255,255,0.12); border-radius: 1px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); margin-top: -7px; border: 2px solid var(--bg); }
+  input[type=range]::-moz-range-track { height: 2px; background: rgba(255,255,255,0.12); border-radius: 1px; }
+  input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--ink); border: 2px solid var(--bg); }
+
+  select {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 8px;
+    appearance: none; -webkit-appearance: none;
+  }
+
+  .panel-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 140ms ease, transform 80ms ease;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary {
+    background: var(--accent);
+    color: #0a0a0a;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .btn.danger { color: var(--bad); border-color: rgba(255,90,90,0.2); }
+  .btn.muted-toggle.active { background: rgba(255,90,90,0.12); color: var(--bad); border-color: rgba(255,90,90,0.25); }
+
+  /* ----- BUBBLE MARKER ----- */
+  .bubble-marker {
+    position: relative;
+    width: 28px; height: 28px;
+    transform: translateY(0);
+    cursor: grab;
+  }
+  .bubble-marker.locked { cursor: default; }
+  .bubble-marker .core {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 12px currentColor, 0 0 0 2px rgba(0,0,0,0.35) inset;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+  .bubble-marker.muted .core { background: transparent; border: 2px dashed currentColor; box-shadow: none; }
+  .bubble-marker.selected .core { transform: scale(1.18); box-shadow: 0 0 22px currentColor, 0 0 0 3px rgba(255,255,255,0.85) inset; }
+  .bubble-marker .lbl {
+    position: absolute;
+    bottom: 100%; left: 50%;
+    transform: translate(-50%, -4px);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--ink);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.65);
+    pointer-events: none;
+  }
+
+  /* ----- LISTENER MARKER ----- */
+  .listener-marker {
+    width: 28px; height: 28px;
+    position: relative;
+    pointer-events: none;
+  }
+  .listener-marker .ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 16px rgba(212,255,58,0.55);
+  }
+  .listener-marker .arrow {
+    position: absolute;
+    top: -14px; left: 50%;
+    width: 0; height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-bottom: 12px solid var(--accent);
+    transform-origin: 50% 22px;
+    transform: translateX(-50%) rotate(0deg);
+    filter: drop-shadow(0 0 6px rgba(212,255,58,0.7));
+  }
+
+  /* ----- START SCREEN ----- */
+  .start {
+    position: absolute; inset: 0;
+    z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    background:
+      radial-gradient(60% 50% at 50% 38%, rgba(212,255,58,0.08), rgba(14,14,16,0) 70%),
+      linear-gradient(180deg, #0e0e10 0%, #07070a 100%);
+    padding: 24px;
+    transition: opacity 300ms ease, transform 300ms ease;
+  }
+  .start.gone { opacity: 0; transform: scale(0.98); pointer-events: none; }
+  .start h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(72px, 22vw, 168px);
+    line-height: 0.9;
+    margin: 0 0 18px;
+    letter-spacing: -0.04em;
+    font-variation-settings: "opsz" 144;
+    display: inline-flex; align-items: baseline; gap: 6px;
+  }
+  .start h1 .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); display: inline-block; transform: translateY(-6px); box-shadow: 0 0 24px var(--accent); }
+  .start .sub {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 16px;
+    color: var(--ink-dim);
+    margin-bottom: 36px;
+    font-variation-settings: "opsz" 24;
+    letter-spacing: 0.01em;
+  }
+  .start .begin {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-weight: 600;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    border-radius: 999px;
+    padding: 16px 44px;
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(212,255,58,0.28), 0 0 0 1px rgba(212,255,58,0.5) inset;
+    transition: transform 120ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .start .begin:active { transform: scale(0.97); }
+  .start .err {
+    margin-top: 22px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--bad);
+    max-width: 320px;
+    line-height: 1.5;
+    letter-spacing: 0.04em;
+  }
+  .start .hint {
+    margin-top: 28px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  /* small-screen tightening */
+  @media (max-width: 380px) {
+    .ctrl-row .label { width: 48px; }
+    .bubble-chip { padding: 7px 8px; font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<header class="header">
+  <div class="brand">Bubl<span class="dot"></span></div>
+  <div class="status" id="status">
+    <div class="row"><span class="k">Mode</span><span class="v" id="st-mode">EDIT</span></div>
+    <div class="row"><span class="k">Sel</span><span class="v" id="st-sel">—</span></div>
+    <div class="row" id="st-gps-row" style="display:none"><span class="k">GPS</span><span class="v" id="st-gps">—</span></div>
+    <div class="row" id="st-hdg-row" style="display:none"><span class="k">Hdg</span><span class="v" id="st-hdg">—</span></div>
+    <div class="row" id="st-aud-row" style="display:none"><span class="k">Aud</span><span class="v" id="st-aud">0/3</span></div>
+  </div>
+</header>
+
+<section class="panel" id="panel">
+  <div class="bubble-list" id="bubble-list"></div>
+  <div class="controls" id="controls"></div>
+  <div class="panel-actions" id="panel-actions"></div>
+</section>
+
+<div class="start" id="start">
+  <h1>Bubl<span class="dot"></span></h1>
+  <div class="sub">Spatial audio test · San Pedro</div>
+  <button class="begin" id="begin">Begin</button>
+  <div class="err" id="start-err" style="display:none"></div>
+  <div class="hint">Headphones recommended</div>
+</div>
+
+<script>
+/* =========================================================================
+   Bubl spatial audio prototype
+   ========================================================================= */
+
+const AUDIO_DIR = 'Test File Sounds/';
+
+const ORIGIN_LAT = 33.7377;
+const ORIGIN_LNG = -118.2792;
+const EARTH_R = 6371000;
+
+const FILES = [
+  'drumming-jungle-music.wav',
+  'jungle_birds_canopy_X.mp3',
+  'jungle_insects_X.mp3',
+];
+
+const state = {
+  mode: 'start',           // 'start' | 'edit' | 'listen'
+  selectedBubbleId: 'b1',
+  bubbles: [
+    { id: 'b1', name: 'DRUMS',   color: '#d4ff3a', lat: 33.73780, lng: -118.27915, radius: 15, volume: 1.0, muted: false, audioFile: 'drumming-jungle-music.wav' },
+    { id: 'b2', name: 'BIRDS',   color: '#ff8b4a', lat: 33.73770, lng: -118.27925, radius: 15, volume: 1.0, muted: false, audioFile: 'jungle_birds_canopy_X.mp3' },
+    { id: 'b3', name: 'INSECTS', color: '#5ec3ff', lat: 33.73760, lng: -118.27915, radius: 15, volume: 1.0, muted: false, audioFile: 'jungle_insects_X.mp3' },
+  ],
+  listener: { lat: null, lng: null, accuracy: null, heading: 0 },
+  audio: {
+    ctx: null,
+    buffers: {},     // filename -> AudioBuffer
+    nodes: {},       // bubbleId -> { source, gain, panner }
+  },
+  watchId: null,
+  wakeLock: null,
+  geoOk: false,
+};
+
+/* ---------- math helpers ---------- */
+function latLngToMeters(lat, lng) {
+  const dLat = (lat - ORIGIN_LAT) * Math.PI / 180;
+  const dLng = (lng - ORIGIN_LNG) * Math.PI / 180;
+  const x = dLng * Math.cos(ORIGIN_LAT * Math.PI / 180) * EARTH_R; // east is +x
+  const z = -dLat * EARTH_R;                                        // north is -z (Y-up, right-handed)
+  return { x, z };
+}
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const a = latLngToMeters(lat1, lng1);
+  const b = latLngToMeters(lat2, lng2);
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+function circlePolygon(lat, lng, radiusM, segments = 64) {
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  const dLatPerM = 1 / 111111;
+  const dLngPerM = 1 / (111111 * cosLat);
+  const coords = [];
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * Math.PI * 2;
+    const dx = Math.cos(theta) * radiusM;
+    const dy = Math.sin(theta) * radiusM;
+    coords.push([lng + dx * dLngPerM, lat + dy * dLatPerM]);
+  }
+  return [coords];
+}
+
+/* ---------- MapLibre setup ---------- */
+const STYLE_PRIMARY  = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
+const STYLE_FALLBACK = 'https://tiles.openfreemap.org/styles/positron';
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: STYLE_PRIMARY,
+  center: [ORIGIN_LNG, ORIGIN_LAT],
+  zoom: 19,
+  pitch: 0,
+  bearing: 0,
+  attributionControl: { compact: true },
+});
+map.on('error', (e) => {
+  if (!map._fellBack && e && e.error && (e.error.status === 404 || e.error.status === 429)) {
+    map._fellBack = true;
+    try { map.setStyle(STYLE_FALLBACK); } catch (_) {}
+  }
+});
+
+let bubbleMarkers = {};      // id -> { marker, el }
+let listenerMarker = null;
+
+function ensureRingLayers() {
+  for (const b of state.bubbles) {
+    const srcId = 'ring-src-' + b.id;
+    const fillId = 'ring-fill-' + b.id;
+    const lineId = 'ring-line-' + b.id;
+    if (map.getSource(srcId)) continue;
+    map.addSource(srcId, {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: circlePolygon(b.lat, b.lng, b.radius) }, properties: {} },
+    });
+    map.addLayer({ id: fillId, type: 'fill', source: srcId, paint: { 'fill-color': b.color, 'fill-opacity': 0.10 } });
+    map.addLayer({ id: lineId, type: 'line', source: srcId, paint: { 'line-color': b.color, 'line-opacity': 0.55, 'line-width': 1.5 } });
+  }
+}
+function updateRing(b) {
+  const src = map.getSource('ring-src-' + b.id);
+  if (!src) return;
+  src.setData({ type: 'Feature', geometry: { type: 'Polygon', coordinates: circlePolygon(b.lat, b.lng, b.radius) }, properties: {} });
+}
+
+function makeBubbleEl(b) {
+  const el = document.createElement('div');
+  el.className = 'bubble-marker';
+  el.style.color = b.color;
+  el.innerHTML = `<div class="lbl">${b.name}</div><div class="core"></div>`;
+  if (b.id === state.selectedBubbleId) el.classList.add('selected');
+  if (b.muted) el.classList.add('muted');
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    selectBubble(b.id);
+  });
+  return el;
+}
+
+function placeBubbles() {
+  for (const b of state.bubbles) {
+    const el = makeBubbleEl(b);
+    const m = new maplibregl.Marker({ element: el, draggable: state.mode === 'edit', anchor: 'center' })
+      .setLngLat([b.lng, b.lat])
+      .addTo(map);
+    m.on('drag', () => {
+      const ll = m.getLngLat();
+      b.lat = ll.lat; b.lng = ll.lng;
+      updateRing(b);
+      updatePannerPosition(b);
+    });
+    m.on('dragend', () => {
+      const ll = m.getLngLat();
+      b.lat = ll.lat; b.lng = ll.lng;
+      updateRing(b);
+      updatePannerPosition(b);
+      renderStatus();
+    });
+    bubbleMarkers[b.id] = { marker: m, el };
+  }
+}
+
+function setMarkersDraggable(draggable) {
+  for (const id in bubbleMarkers) {
+    const { marker, el } = bubbleMarkers[id];
+    marker.setDraggable(draggable);
+    el.classList.toggle('locked', !draggable);
+  }
+}
+
+function refreshMarkerEl(b) {
+  const entry = bubbleMarkers[b.id];
+  if (!entry) return;
+  entry.el.classList.toggle('selected', b.id === state.selectedBubbleId);
+  entry.el.classList.toggle('muted', !!b.muted);
+}
+
+/* ---------- selection / panel rendering ---------- */
+function selectBubble(id) {
+  state.selectedBubbleId = id;
+  for (const b of state.bubbles) refreshMarkerEl(b);
+  renderPanel();
+  renderStatus();
+}
+
+function renderPanel() {
+  const list = document.getElementById('bubble-list');
+  const ctrls = document.getElementById('controls');
+  const actions = document.getElementById('panel-actions');
+  list.innerHTML = '';
+  for (const b of state.bubbles) {
+    const chip = document.createElement('div');
+    chip.className = 'bubble-chip' + (b.id === state.selectedBubbleId ? ' selected' : '') + (b.muted ? ' muted' : '');
+    chip.innerHTML = `<span class="dot" style="background:${b.color};color:${b.color}"></span><span class="name">${b.name}</span>`;
+    chip.addEventListener('click', () => selectBubble(b.id));
+    list.appendChild(chip);
+  }
+
+  const sel = state.bubbles.find(x => x.id === state.selectedBubbleId);
+  ctrls.innerHTML = '';
+  actions.innerHTML = '';
+  if (!sel) return;
+
+  // Radius
+  const rRow = document.createElement('label');
+  rRow.className = 'ctrl-row';
+  rRow.innerHTML = `<span class="label">Radius</span><input type="range" min="3" max="50" step="1" value="${sel.radius}"><span class="value">${sel.radius}m</span>`;
+  const rInput = rRow.querySelector('input');
+  const rVal = rRow.querySelector('.value');
+  rInput.addEventListener('input', () => {
+    sel.radius = parseInt(rInput.value, 10);
+    rVal.textContent = sel.radius + 'm';
+    updateRing(sel);
+    const nodes = state.audio.nodes[sel.id];
+    if (nodes) nodes.panner.maxDistance = sel.radius;
+  });
+  ctrls.appendChild(rRow);
+
+  // Volume
+  const vRow = document.createElement('label');
+  vRow.className = 'ctrl-row';
+  vRow.innerHTML = `<span class="label">Volume</span><input type="range" min="0" max="1" step="0.01" value="${sel.volume}"><span class="value">${sel.volume.toFixed(2)}</span>`;
+  const vInput = vRow.querySelector('input');
+  const vVal = vRow.querySelector('.value');
+  vInput.addEventListener('input', () => {
+    sel.volume = parseFloat(vInput.value);
+    vVal.textContent = sel.volume.toFixed(2);
+    const nodes = state.audio.nodes[sel.id];
+    if (nodes) nodes.gain.gain.value = sel.muted ? 0 : sel.volume;
+  });
+  ctrls.appendChild(vRow);
+
+  // Audio file picker
+  const fRow = document.createElement('label');
+  fRow.className = 'ctrl-row';
+  fRow.innerHTML = `<span class="label">Sound</span>`;
+  const select = document.createElement('select');
+  for (const f of FILES) {
+    const opt = document.createElement('option');
+    opt.value = f; opt.textContent = f;
+    if (f === sel.audioFile) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    sel.audioFile = select.value;
+    if (state.mode === 'listen') {
+      // hot-swap: stop, reload, restart
+      restartBubbleAudio(sel);
+    }
+  });
+  fRow.appendChild(select);
+  ctrls.appendChild(fRow);
+
+  // Mute toggle
+  const muteBtn = document.createElement('button');
+  muteBtn.className = 'btn muted-toggle' + (sel.muted ? ' active' : '');
+  muteBtn.textContent = sel.muted ? 'Muted' : 'Mute';
+  muteBtn.addEventListener('click', () => {
+    sel.muted = !sel.muted;
+    muteBtn.textContent = sel.muted ? 'Muted' : 'Mute';
+    muteBtn.classList.toggle('active', sel.muted);
+    refreshMarkerEl(sel);
+    const chips = document.querySelectorAll('.bubble-chip');
+    chips.forEach((c, i) => c.classList.toggle('muted', state.bubbles[i].muted));
+    const nodes = state.audio.nodes[sel.id];
+    if (nodes) nodes.gain.gain.value = sel.muted ? 0 : sel.volume;
+  });
+  actions.appendChild(muteBtn);
+
+  // Mode toggle button
+  if (state.mode === 'edit') {
+    const listenBtn = document.createElement('button');
+    listenBtn.className = 'btn primary';
+    listenBtn.textContent = 'Listen';
+    listenBtn.addEventListener('click', enterListenMode);
+    actions.appendChild(listenBtn);
+  } else if (state.mode === 'listen') {
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'btn danger';
+    stopBtn.textContent = 'Stop';
+    stopBtn.addEventListener('click', enterEditMode);
+    actions.appendChild(stopBtn);
+  }
+}
+
+function renderStatus() {
+  document.getElementById('st-mode').textContent = state.mode.toUpperCase();
+  document.getElementById('st-sel').textContent = state.selectedBubbleId
+    ? (state.bubbles.find(b => b.id === state.selectedBubbleId)?.name || '—')
+    : '—';
+  const gpsRow = document.getElementById('st-gps-row');
+  const hdgRow = document.getElementById('st-hdg-row');
+  const audRow = document.getElementById('st-aud-row');
+  const listen = state.mode === 'listen';
+  gpsRow.style.display = listen ? '' : 'none';
+  hdgRow.style.display = listen ? '' : 'none';
+  audRow.style.display = listen ? '' : 'none';
+
+  if (listen) {
+    const gpsEl = document.getElementById('st-gps');
+    const acc = state.listener.accuracy;
+    if (acc == null) {
+      gpsEl.textContent = '—'; gpsEl.className = 'v';
+    } else {
+      gpsEl.textContent = `±${acc.toFixed(0)}m`;
+      gpsEl.className = 'v ' + (acc < 8 ? 'good' : acc <= 15 ? 'warn' : 'bad');
+    }
+    document.getElementById('st-hdg').textContent = `${Math.round(state.listener.heading)}°`;
+    let audible = 0;
+    if (state.listener.lat != null) {
+      for (const b of state.bubbles) {
+        if (b.muted) continue;
+        if (distanceMeters(state.listener.lat, state.listener.lng, b.lat, b.lng) < b.radius) audible++;
+      }
+    }
+    document.getElementById('st-aud').textContent = `${audible}/${state.bubbles.length}`;
+  }
+}
+
+/* ---------- audio ---------- */
+function ensureAudioCtx() {
+  if (!state.audio.ctx) {
+    state.audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    state.audio.ctx.listener.positionY && (state.audio.ctx.listener.positionY.value = 1.6);
+  }
+  return state.audio.ctx;
+}
+
+async function loadBuffer(file) {
+  if (state.audio.buffers[file]) return state.audio.buffers[file];
+  const ctx = ensureAudioCtx();
+  const res = await fetch(AUDIO_DIR + encodeURIComponent(file));
+  if (!res.ok) throw new Error(`fetch ${file}: ${res.status}`);
+  const arr = await res.arrayBuffer();
+  const buf = await ctx.decodeAudioData(arr);
+  state.audio.buffers[file] = buf;
+  return buf;
+}
+
+function startBubbleAudio(b) {
+  const ctx = ensureAudioCtx();
+  const buffer = state.audio.buffers[b.audioFile];
+  if (!buffer) return;
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+
+  const gain = ctx.createGain();
+  gain.gain.value = b.muted ? 0 : b.volume;
+
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 1.0;
+  panner.maxDistance = b.radius;
+  panner.rolloffFactor = 1.5;
+  const m = latLngToMeters(b.lat, b.lng);
+  if (panner.positionX) {
+    panner.positionX.value = m.x;
+    panner.positionY.value = 0;
+    panner.positionZ.value = m.z;
+  } else {
+    panner.setPosition(m.x, 0, m.z);
+  }
+
+  source.connect(gain).connect(panner).connect(ctx.destination);
+  source.start();
+
+  state.audio.nodes[b.id] = { source, gain, panner };
+}
+
+function stopBubbleAudio(b) {
+  const nodes = state.audio.nodes[b.id];
+  if (!nodes) return;
+  try { nodes.source.stop(); } catch (_) {}
+  try { nodes.source.disconnect(); } catch (_) {}
+  try { nodes.gain.disconnect(); } catch (_) {}
+  try { nodes.panner.disconnect(); } catch (_) {}
+  delete state.audio.nodes[b.id];
+}
+
+async function restartBubbleAudio(b) {
+  stopBubbleAudio(b);
+  try { await loadBuffer(b.audioFile); } catch (e) { console.warn(e); return; }
+  startBubbleAudio(b);
+}
+
+function updatePannerPosition(b) {
+  const nodes = state.audio.nodes[b.id];
+  if (!nodes) return;
+  const m = latLngToMeters(b.lat, b.lng);
+  if (nodes.panner.positionX) {
+    nodes.panner.positionX.value = m.x;
+    nodes.panner.positionZ.value = m.z;
+  } else {
+    nodes.panner.setPosition(m.x, 0, m.z);
+  }
+}
+
+function updateListenerPosition() {
+  const ctx = state.audio.ctx;
+  if (!ctx || state.listener.lat == null) return;
+  const m = latLngToMeters(state.listener.lat, state.listener.lng);
+  if (ctx.listener.positionX) {
+    ctx.listener.positionX.value = m.x;
+    ctx.listener.positionY.value = 1.6;
+    ctx.listener.positionZ.value = m.z;
+  } else {
+    ctx.listener.setPosition(m.x, 1.6, m.z);
+  }
+}
+
+function applyListenerOrientation(heading) {
+  const ctx = state.audio.ctx;
+  if (!ctx) return;
+  const rad = heading * Math.PI / 180;
+  const fwdX = Math.sin(rad);
+  const fwdZ = -Math.cos(rad);
+  if (ctx.listener.forwardX) {
+    ctx.listener.forwardX.value = fwdX;
+    ctx.listener.forwardY.value = 0;
+    ctx.listener.forwardZ.value = fwdZ;
+    ctx.listener.upX.value = 0;
+    ctx.listener.upY.value = 1;
+    ctx.listener.upZ.value = 0;
+  } else {
+    ctx.listener.setOrientation(fwdX, 0, fwdZ, 0, 1, 0);
+  }
+}
+
+/* ---------- device orientation ---------- */
+function attachOrientationListener() {
+  window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  // iOS sometimes only fires the absolute variant
+  window.addEventListener('deviceorientationabsolute', onDeviceOrientation, true);
+}
+function onDeviceOrientation(e) {
+  const wch = e.webkitCompassHeading;
+  let heading;
+  if (typeof wch === 'number') {
+    heading = wch;
+  } else if (typeof e.alpha === 'number') {
+    heading = (360 - e.alpha) % 360;
+  } else {
+    return;
+  }
+  state.listener.heading = heading;
+  applyListenerOrientation(heading);
+  if (listenerMarker) {
+    const arrow = listenerMarker.getElement().querySelector('.arrow');
+    if (arrow) arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`;
+  }
+  if (state.mode === 'listen') renderStatus();
+}
+
+/* ---------- geolocation ---------- */
+function startGeoWatch() {
+  if (!('geolocation' in navigator)) return;
+  if (state.watchId != null) return;
+  state.watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      state.listener.lat = pos.coords.latitude;
+      state.listener.lng = pos.coords.longitude;
+      state.listener.accuracy = pos.coords.accuracy;
+      if (state.mode === 'listen') {
+        updateListenerPosition();
+        if (listenerMarker) listenerMarker.setLngLat([state.listener.lng, state.listener.lat]);
+        map.easeTo({ center: [state.listener.lng, state.listener.lat], duration: 600 });
+        renderStatus();
+      }
+    },
+    (err) => { console.warn('geo watch error', err); },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+  );
+}
+
+/* ---------- mode transitions ---------- */
+async function enterListenMode() {
+  if (state.mode === 'listen') return;
+  if (!state.geoOk) {
+    showStartError('Listen mode needs location permission. Refresh and grant access.');
+    return;
+  }
+  const ctx = ensureAudioCtx();
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (_) {}
+  }
+
+  // load all needed buffers
+  try {
+    await Promise.all(state.bubbles.map(b => loadBuffer(b.audioFile)));
+  } catch (e) {
+    console.warn('audio load failed', e);
+    alert('Failed to load audio files. Check the console.');
+    return;
+  }
+
+  state.mode = 'listen';
+  setMarkersDraggable(false);
+
+  // listener marker
+  if (!listenerMarker) {
+    const el = document.createElement('div');
+    el.className = 'listener-marker';
+    el.innerHTML = '<div class="ring"></div><div class="arrow"></div>';
+    listenerMarker = new maplibregl.Marker({ element: el, anchor: 'center' });
+  }
+  const startLat = state.listener.lat ?? ORIGIN_LAT;
+  const startLng = state.listener.lng ?? ORIGIN_LNG;
+  listenerMarker.setLngLat([startLng, startLat]).addTo(map);
+  map.easeTo({ center: [startLng, startLat], duration: 600 });
+
+  // start audio
+  for (const b of state.bubbles) startBubbleAudio(b);
+  updateListenerPosition();
+  applyListenerOrientation(state.listener.heading || 0);
+
+  // wake lock
+  try {
+    if ('wakeLock' in navigator) {
+      state.wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (_) {}
+
+  renderPanel();
+  renderStatus();
+}
+
+function enterEditMode() {
+  if (state.mode !== 'listen') {
+    state.mode = 'edit';
+    renderPanel();
+    renderStatus();
+    return;
+  }
+  // stop all audio cleanly
+  for (const b of state.bubbles) stopBubbleAudio(b);
+
+  state.mode = 'edit';
+  setMarkersDraggable(true);
+  if (listenerMarker) listenerMarker.remove();
+
+  if (state.wakeLock) { try { state.wakeLock.release(); } catch (_) {} state.wakeLock = null; }
+
+  renderPanel();
+  renderStatus();
+}
+
+/* ---------- start screen ---------- */
+function showStartError(msg) {
+  const el = document.getElementById('start-err');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+document.getElementById('begin').addEventListener('click', async () => {
+  // 1) unlock audio context
+  const ctx = ensureAudioCtx();
+  try { await ctx.resume(); } catch (_) {}
+
+  // 2) iOS DeviceOrientation permission
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const result = await DeviceOrientationEvent.requestPermission();
+      if (result === 'granted') attachOrientationListener();
+    } else {
+      attachOrientationListener();
+    }
+  } catch (_) {
+    attachOrientationListener();
+  }
+
+  // 3) geolocation prompt (one-shot, then watch)
+  if ('geolocation' in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        state.listener.lat = pos.coords.latitude;
+        state.listener.lng = pos.coords.longitude;
+        state.listener.accuracy = pos.coords.accuracy;
+        state.geoOk = true;
+        startGeoWatch();
+      },
+      (err) => {
+        state.geoOk = false;
+        console.warn('geo denied/unavailable', err);
+        showStartError('Location unavailable — you can edit bubbles but not enter Listen mode.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  } else {
+    state.geoOk = false;
+    showStartError('Geolocation not supported on this device.');
+  }
+
+  // 4) reveal app
+  state.mode = 'edit';
+  document.getElementById('start').classList.add('gone');
+  document.getElementById('panel').classList.remove('hidden');
+  renderPanel();
+  renderStatus();
+});
+
+/* ---------- boot ---------- */
+function boot() {
+  // panel hidden until Begin pressed
+  document.getElementById('panel').classList.add('hidden');
+
+  map.on('load', () => {
+    ensureRingLayers();
+    placeBubbles();
+    // tap empty map = deselect? keep selection sticky for simplicity
+  });
+  map.on('styledata', () => {
+    // re-add ring sources/layers after fallback style swap
+    if (map.isStyleLoaded()) {
+      try { ensureRingLayers(); } catch (_) {}
+    }
+  });
+
+  renderPanel();
+  renderStatus();
+}
+boot();
+</script>
+</body>
+</html>
