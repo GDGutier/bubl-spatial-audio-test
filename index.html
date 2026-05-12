@@ -437,6 +437,28 @@ function ensureRingLayers() {
     map.addLayer({ id: fillId, type: 'fill', source: srcId, paint: { 'fill-color': b.color, 'fill-opacity': 0.10 } });
     map.addLayer({ id: lineId, type: 'line', source: srcId, paint: { 'line-color': b.color, 'line-opacity': 0.55, 'line-width': 1.5 } });
   }
+  // Listener GPS accuracy ring — visualises uncertainty in metres so it scales
+  // correctly when zooming. Empty FeatureCollection until we have a fix.
+  if (!map.getSource('listener-accuracy-src')) {
+    map.addSource('listener-accuracy-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'listener-accuracy-fill', type: 'fill', source: 'listener-accuracy-src', paint: { 'fill-color': '#d4ff3a', 'fill-opacity': 0.08 } });
+    map.addLayer({ id: 'listener-accuracy-line', type: 'line', source: 'listener-accuracy-src', paint: { 'line-color': '#d4ff3a', 'line-opacity': 0.35, 'line-width': 1 } });
+  }
+}
+
+function updateListenerAccuracyRing() {
+  const src = map.getSource('listener-accuracy-src');
+  if (!src) return;
+  const { lat, lng, accuracy } = state.listener;
+  if (state.mode !== 'listen' || lat == null || !accuracy) {
+    src.setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
+  src.setData({
+    type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: circlePolygon(lat, lng, accuracy) },
+    properties: {},
+  });
 }
 function updateRing(b) {
   const src = map.getSource('ring-src-' + b.id);
@@ -816,6 +838,7 @@ function startGeoWatch() {
       if (state.mode === 'listen') {
         updateListenerPosition();
         if (listenerMarker) listenerMarker.setLngLat([state.listener.lng, state.listener.lat]);
+        updateListenerAccuracyRing();
         map.easeTo({ center: [state.listener.lng, state.listener.lat], duration: 600 });
         renderStatus();
       }
@@ -859,6 +882,7 @@ async function enterListenMode() {
   const startLat = state.listener.lat ?? ORIGIN_LAT;
   const startLng = state.listener.lng ?? ORIGIN_LNG;
   listenerMarker.setLngLat([startLng, startLat]).addTo(map);
+  updateListenerAccuracyRing();
   map.easeTo({ center: [startLng, startLat], duration: 600 });
 
   // start audio (gains begin at 0; applyRadiusGates opens them when in range)
@@ -891,6 +915,7 @@ function enterEditMode() {
   state.mode = 'edit';
   setMarkersDraggable(true);
   if (listenerMarker) listenerMarker.remove();
+  updateListenerAccuracyRing();  // clears the ring
 
   if (state.wakeLock) { try { state.wakeLock.release(); } catch (_) {} state.wakeLock = null; }
 
