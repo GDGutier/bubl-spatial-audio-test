@@ -321,6 +321,8 @@
     <div class="row" id="st-gps-row" style="display:none"><span class="k">GPS</span><span class="v" id="st-gps">—</span></div>
     <div class="row" id="st-hdg-row" style="display:none"><span class="k">Hdg</span><span class="v" id="st-hdg">—</span></div>
     <div class="row" id="st-aud-row" style="display:none"><span class="k">Aud</span><span class="v" id="st-aud">0/3</span></div>
+    <div class="row" id="st-z-row" style="display:none"><span class="k">Z</span><span class="v" id="st-z">—</span></div>
+    <div class="row" id="st-d-row" style="display:none"><span class="k">Δ</span><span class="v" id="st-d">—</span></div>
   </div>
 </header>
 
@@ -425,6 +427,8 @@ map.on('load', () => {
     map.touchZoomRotate.disableRotation();
   }
 });
+map.on('move', () => { if (state.mode === 'listen') renderStatus(); });
+map.on('zoom', () => { if (state.mode === 'listen') renderStatus(); });
 map.on('error', (e) => {
   if (!map._fellBack && e && e.error && (e.error.status === 404 || e.error.status === 429)) {
     map._fellBack = true;
@@ -646,10 +650,14 @@ function renderStatus() {
   const gpsRow = document.getElementById('st-gps-row');
   const hdgRow = document.getElementById('st-hdg-row');
   const audRow = document.getElementById('st-aud-row');
+  const zRow   = document.getElementById('st-z-row');
+  const dRow   = document.getElementById('st-d-row');
   const listen = state.mode === 'listen';
   gpsRow.style.display = listen ? '' : 'none';
   hdgRow.style.display = listen ? '' : 'none';
   audRow.style.display = listen ? '' : 'none';
+  zRow.style.display   = listen ? '' : 'none';
+  dRow.style.display   = listen ? '' : 'none';
 
   if (listen) {
     const gpsEl = document.getElementById('st-gps');
@@ -669,6 +677,19 @@ function renderStatus() {
       }
     }
     document.getElementById('st-aud').textContent = `${audible}/${state.bubbles.length}`;
+
+    // Debug: zoom level + distance from camera centre to GPS fix. If Δ stays
+    // near 0 while the dot still visually drifts at low zoom, the markers are
+    // projected correctly and the offset is basemap data, not code.
+    const z = map.getZoom();
+    document.getElementById('st-z').textContent = z.toFixed(1);
+    if (state.listener.lat != null) {
+      const c = map.getCenter();
+      const d = distanceMeters(state.listener.lat, state.listener.lng, c.lat, c.lng);
+      document.getElementById('st-d').textContent = `${d.toFixed(0)}m`;
+    } else {
+      document.getElementById('st-d').textContent = '—';
+    }
   }
 }
 
