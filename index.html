@@ -736,8 +736,17 @@ function updateListenerPosition() {
 }
 
 // PannerNode's inverse distance model never decays to zero; it just floors at
-// maxDistance. To get true silence outside the radius (per spec), we drive each
-// bubble's GainNode directly based on listener-to-bubble distance.
+// maxDistance. We drive each bubble's GainNode directly off listener-to-bubble
+// distance: full volume inside (radius - fadeBand), linear fade to zero across
+// the last fadeBand metres, silent beyond.
+function radiusFade(d, radius) {
+  if (d >= radius) return 0;
+  const fadeBand = Math.max(1, radius * 0.25);
+  const fadeStart = radius - fadeBand;
+  if (d <= fadeStart) return 1;
+  return 1 - (d - fadeStart) / fadeBand;
+}
+
 function applyRadiusGates() {
   if (state.mode !== 'listen') return;
   const haveListener = state.listener.lat != null;
@@ -749,7 +758,7 @@ function applyRadiusGates() {
       continue;
     }
     const d = distanceMeters(state.listener.lat, state.listener.lng, b.lat, b.lng);
-    nodes.gain.gain.value = (d < b.radius) ? b.volume : 0;
+    nodes.gain.gain.value = b.volume * radiusFade(d, b.radius);
   }
 }
 
