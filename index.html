@@ -461,7 +461,7 @@ function makeBubbleEl(b) {
 function placeBubbles() {
   for (const b of state.bubbles) {
     const el = makeBubbleEl(b);
-    const m = new maplibregl.Marker({ element: el, draggable: state.mode === 'edit', anchor: 'center' })
+    const m = new maplibregl.Marker({ element: el, draggable: state.mode !== 'listen', anchor: 'center' })
       .setLngLat([b.lng, b.lat])
       .addTo(map);
     m.on('drag', () => {
@@ -917,6 +917,7 @@ document.getElementById('begin').addEventListener('click', async () => {
 
   // 4) reveal app
   state.mode = 'edit';
+  setMarkersDraggable(true);
   document.getElementById('start').classList.add('gone');
   document.getElementById('panel').classList.remove('hidden');
   renderPanel();
