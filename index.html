@@ -412,7 +412,18 @@ const map = new maplibregl.Map({
   zoom: 19,
   pitch: 0,
   bearing: 0,
+  maxPitch: 0,
+  dragRotate: false,
+  touchPitch: false,
+  pitchWithRotate: false,
   attributionControl: { compact: true },
+});
+map.on('load', () => {
+  // Prevent accidental two-finger rotate; keeps the view flat and north-up so
+  // the listener marker stays geographically aligned at every zoom level.
+  if (map.touchZoomRotate && map.touchZoomRotate.disableRotation) {
+    map.touchZoomRotate.disableRotation();
+  }
 });
 map.on('error', (e) => {
   if (!map._fellBack && e && e.error && (e.error.status === 404 || e.error.status === 429)) {
