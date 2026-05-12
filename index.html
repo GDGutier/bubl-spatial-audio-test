@@ -534,6 +534,8 @@ function renderPanel() {
     updateRing(sel);
     const nodes = state.audio.nodes[sel.id];
     if (nodes) nodes.panner.maxDistance = sel.radius;
+    applyRadiusGates();
+    renderStatus();
   });
   ctrls.appendChild(rRow);
 
@@ -546,8 +548,7 @@ function renderPanel() {
   vInput.addEventListener('input', () => {
     sel.volume = parseFloat(vInput.value);
     vVal.textContent = sel.volume.toFixed(2);
-    const nodes = state.audio.nodes[sel.id];
-    if (nodes) nodes.gain.gain.value = sel.muted ? 0 : sel.volume;
+    applyRadiusGates();
   });
   ctrls.appendChild(vRow);
 
@@ -583,8 +584,8 @@ function renderPanel() {
     refreshMarkerEl(sel);
     const chips = document.querySelectorAll('.bubble-chip');
     chips.forEach((c, i) => c.classList.toggle('muted', state.bubbles[i].muted));
-    const nodes = state.audio.nodes[sel.id];
-    if (nodes) nodes.gain.gain.value = sel.muted ? 0 : sel.volume;
+    applyRadiusGates();
+    renderStatus();
   });
   actions.appendChild(muteBtn);
 
@@ -668,7 +669,8 @@ function startBubbleAudio(b) {
   source.loop = true;
 
   const gain = ctx.createGain();
-  gain.gain.value = b.muted ? 0 : b.volume;
+  // Start silent; applyRadiusGates() will open it when listener is in range.
+  gain.gain.value = 0;
 
   const panner = ctx.createPanner();
   panner.panningModel = 'HRTF';
@@ -729,6 +731,25 @@ function updateListenerPosition() {
     ctx.listener.positionZ.value = m.z;
   } else {
     ctx.listener.setPosition(m.x, 1.6, m.z);
+  }
+  applyRadiusGates();
+}
+
+// PannerNode's inverse distance model never decays to zero; it just floors at
+// maxDistance. To get true silence outside the radius (per spec), we drive each
+// bubble's GainNode directly based on listener-to-bubble distance.
+function applyRadiusGates() {
+  if (state.mode !== 'listen') return;
+  const haveListener = state.listener.lat != null;
+  for (const b of state.bubbles) {
+    const nodes = state.audio.nodes[b.id];
+    if (!nodes) continue;
+    if (!haveListener || b.muted) {
+      nodes.gain.gain.value = 0;
+      continue;
+    }
+    const d = distanceMeters(state.listener.lat, state.listener.lng, b.lat, b.lng);
+    nodes.gain.gain.value = (d < b.radius) ? b.volume : 0;
   }
 }
 
@@ -832,9 +853,10 @@ async function enterListenMode() {
   listenerMarker.setLngLat([startLng, startLat]).addTo(map);
   map.easeTo({ center: [startLng, startLat], duration: 600 });
 
-  // start audio
+  // start audio (gains begin at 0; applyRadiusGates opens them when in range)
   for (const b of state.bubbles) startBubbleAudio(b);
   updateListenerPosition();
+  applyRadiusGates();
   applyListenerOrientation(state.listener.heading || 0);
 
   // wake lock
