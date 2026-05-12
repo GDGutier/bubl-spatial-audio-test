@@ -677,7 +677,7 @@ function startBubbleAudio(b) {
   panner.distanceModel = 'inverse';
   panner.refDistance = 1.0;
   panner.maxDistance = b.radius;
-  panner.rolloffFactor = 1.5;
+  panner.rolloffFactor = 0;  // distance attenuation handled by radiusFade()
   const m = latLngToMeters(b.lat, b.lng);
   if (panner.positionX) {
     panner.positionX.value = m.x;
@@ -735,16 +735,15 @@ function updateListenerPosition() {
   applyRadiusGates();
 }
 
-// PannerNode's inverse distance model never decays to zero; it just floors at
-// maxDistance. We drive each bubble's GainNode directly off listener-to-bubble
-// distance: full volume inside (radius - fadeBand), linear fade to zero across
-// the last fadeBand metres, silent beyond.
+// We drive each bubble's GainNode directly off listener-to-bubble distance.
+// Quadratic falloff from 1 at the centre to 0 at the radius — perceptually
+// dramatic (loud at centre, distinctly faint near the edge). PannerNode's own
+// rolloff is disabled (rolloffFactor=0); HRTF still spatialises L/R.
 function radiusFade(d, radius) {
   if (d >= radius) return 0;
-  const fadeBand = Math.max(1, radius * 0.25);
-  const fadeStart = radius - fadeBand;
-  if (d <= fadeStart) return 1;
-  return 1 - (d - fadeStart) / fadeBand;
+  const t = d / radius;
+  const k = 1 - t;
+  return k * k;
 }
 
 function applyRadiusGates() {
