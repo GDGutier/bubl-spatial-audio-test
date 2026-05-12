@@ -429,6 +429,19 @@ map.on('load', () => {
 });
 map.on('move', () => { if (state.mode === 'listen') renderStatus(); });
 map.on('zoom', () => { if (state.mode === 'listen') renderStatus(); });
+
+// Pinch-zoom on touch pivots around the gesture centroid, not the map centre.
+// If your fingers aren't perfectly centred, every zoom step drifts the camera
+// away from your GPS position - sub-metre at high zoom, kilometres at low zoom.
+// After any user-initiated zoom ends, snap the camera back to the listener so
+// you stay on screen. e.originalEvent is set only for user gestures, so this
+// won't trigger on our own easeTo() pans from GPS updates.
+map.on('zoomend', (e) => {
+  if (state.mode !== 'listen') return;
+  if (!e || !e.originalEvent) return;
+  if (state.listener.lat == null) return;
+  map.easeTo({ center: [state.listener.lng, state.listener.lat], duration: 300 });
+});
 map.on('error', (e) => {
   if (!map._fellBack && e && e.error && (e.error.status === 404 || e.error.status === 429)) {
     map._fellBack = true;
